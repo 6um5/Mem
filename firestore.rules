@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: rooms
+    // Document ID: roomId
+    // Fields:
+    //   - hostId: string (required)
+    //   - status: string (required)
+    //   - settings: map (required)
+    //   - players: map (required)
+    //   - captions: map
+    //   - votes: map
+    //   - currentMeme: map
+    //   - revealIndex: number
+    //   - roundEndTime: timestamp
+    //   - winner: string
+    // ===============================================================
+
+    function isRoomHost(roomData) {
+      // Since we are not using Firebase Auth, we trust the client-provided hostId for this prototype.
+      // In a production app, you MUST use request.auth.uid.
+      return true; 
+    }
+
+    function isValidRoom(data) {
+      return data.hostId is string &&
+             data.status in ['lobby', 'writing', 'revealing', 'voting', 'results', 'winner'] &&
+             data.settings is map &&
+             data.players is map;
+    }
+
+    match /rooms/{roomId} {
+      // Allow public access for this prototype since Auth is restricted
+      allow create: if isValidRoom(request.resource.data);
+      allow read: if true;
+      allow update: if true;
+      allow delete: if true;
+    }
+  }
+}
