@@ -23,7 +23,10 @@ import {
   Play, 
   ChevronRight,
   UserMinus,
-  AlertCircle
+  AlertCircle,
+  Upload,
+  RefreshCw,
+  Image as ImageIcon
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -197,6 +200,18 @@ export default function App() {
     } else {
       setError('الغرفة غير موجودة!');
     }
+  };
+
+  const leaveRoom = async () => {
+    if (!roomId || !user?.uid || !room) return;
+    const newPlayers = { ...room.players };
+    delete newPlayers[user.uid];
+    
+    // If host leaves, we could assign a new host or just let it be. 
+    // For simplicity, we just remove the player.
+    await safeUpdateDoc(doc(db, 'rooms', roomId), { players: newPlayers });
+    setRoomId(null);
+    setRoom(null);
   };
 
   const kickPlayer = async (uid: string) => {
@@ -449,12 +464,107 @@ export default function App() {
               onAdvanceReveal={advanceReveal}
               onVote={submitVote}
               onCalculateResults={calculateResults}
+              onLeave={leaveRoom}
             />
           )}
         </AnimatePresence>
       </main>
 
       <Footer />
+    </div>
+  );
+}
+
+function CustomImageSelector({ onSelectMeme }: { onSelectMeme: (meme: Meme) => void }) {
+  const [url, setUrl] = useState('');
+  const [preview, setPreview] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUrl(e.target.value);
+    setPreview(e.target.value);
+    setError(null);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        
+        const MAX_WIDTH = 800;
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        
+        const base64 = canvas.toDataURL('image/jpeg', 0.7);
+        setPreview(base64);
+        setUrl(base64);
+        setError(null);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto bg-white/5 border border-white/10 rounded-3xl p-6 space-y-4 shadow-xl mt-8">
+      <h3 className="text-lg font-bold text-indigo-400">أو استخدم صورة من اختيارك (رفع من الجهاز أو رابط):</h3>
+      
+      <div className="flex flex-col sm:flex-row gap-3">
+        <input 
+          type="url" 
+          value={url.startsWith('data:') ? '' : url}
+          onChange={handleUrlChange}
+          placeholder="ضع رابط الصورة هنا (URL)..."
+          className="flex-grow bg-slate-900/50 border border-white/10 rounded-xl px-4 py-3 text-left dir-ltr focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        />
+        <label className="bg-slate-800 hover:bg-slate-700 px-6 py-3 rounded-xl font-bold transition-all whitespace-nowrap cursor-pointer flex items-center justify-center gap-2">
+          <Upload className="w-5 h-5" />
+          رفع صورة
+          <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+        </label>
+      </div>
+
+      {preview && (
+        <div className="mt-4 space-y-4">
+          <p className="text-sm text-slate-400">معاينة الصورة:</p>
+          <div className="relative aspect-video rounded-xl overflow-hidden bg-slate-900 border border-white/10 flex items-center justify-center">
+            <img 
+              src={preview} 
+              alt="Preview" 
+              className="max-w-full max-h-full object-contain"
+              onError={() => {
+                setError('تعذر تحميل الصورة. تأكد من الرابط أو جرب صورة أخرى.');
+                setPreview(null);
+              }}
+              referrerPolicy="no-referrer"
+            />
+          </div>
+          {error ? (
+            <p className="text-red-400 text-sm font-bold">{error}</p>
+          ) : (
+            <button 
+              onClick={() => onSelectMeme({ url: preview, title: 'صورة مخصصة' })}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 px-6 py-4 rounded-xl font-bold transition-all text-lg shadow-lg shadow-indigo-600/20"
+            >
+              استخدام هذه الصورة
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -470,7 +580,8 @@ function GameView({
   onSubmitCaption,
   onAdvanceReveal,
   onVote,
-  onCalculateResults
+  onCalculateResults,
+  onLeave
 }: { 
   user: any, 
   room: RoomData, 
@@ -482,7 +593,8 @@ function GameView({
   onSubmitCaption: (text: string) => void,
   onAdvanceReveal: () => void,
   onVote: (uid: string) => void,
-  onCalculateResults: () => void
+  onCalculateResults: () => void,
+  onLeave: () => void
 }) {
   const isHost = room.hostId === user.uid;
   const [caption, setCaption] = useState('');
@@ -554,6 +666,26 @@ function GameView({
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="space-y-3">
+          <button 
+            onClick={onLeave}
+            className="w-full flex items-center justify-center gap-2 p-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-2xl transition-all font-bold"
+          >
+            <LogOut className="w-5 h-5" />
+            خروج من الغرفة
+          </button>
+
+          {isHost && room.status !== 'lobby' && (
+            <button 
+              onClick={() => safeUpdateDoc(doc(db, 'rooms', roomId), { status: 'lobby', currentMeme: deleteField(), memeOptions: deleteField(), captions: {}, votes: {}, revealIndex: 0 })}
+              className="w-full flex items-center justify-center gap-2 p-3 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 rounded-2xl transition-all font-bold"
+            >
+              <RefreshCw className="w-5 h-5" />
+              إلغاء الجولة
+            </button>
+          )}
         </div>
 
         {isHost && room.status === 'lobby' && (
@@ -676,31 +808,7 @@ function GameView({
                     </button>
                   </div>
                   
-                  <div className="max-w-2xl mx-auto bg-white/5 border border-white/10 rounded-3xl p-6 space-y-4 shadow-xl">
-                    <h3 className="text-lg font-bold text-indigo-400">أو استخدم صورة من اختيارك (ميم عراقي، صورة من جهازك، الخ):</h3>
-                    <div className="flex flex-col sm:flex-row gap-3">
-                      <input 
-                        type="url" 
-                        id="custom-meme-url"
-                        placeholder="ضع رابط الصورة هنا (URL)..."
-                        className="flex-grow bg-slate-900/50 border border-white/10 rounded-xl px-4 py-3 text-left dir-ltr focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
-                      <button 
-                        onClick={() => {
-                          const input = document.getElementById('custom-meme-url') as HTMLInputElement;
-                          if (input && input.value.trim()) {
-                            onSelectMeme({ url: input.value.trim(), title: 'صورة مخصصة' });
-                          }
-                        }}
-                        className="bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-xl font-bold transition-all whitespace-nowrap"
-                      >
-                        استخدام الصورة
-                      </button>
-                    </div>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      💡 <strong className="text-white">نصيحة:</strong> ابحث في جوجل عن "ميمز عراقية فارغة" أو أي صورة تعجبك، اضغط عليها كليك يمين واختر <strong className="text-white">Copy Image Address</strong> (نسخ عنوان الصورة) والصقه هنا!
-                    </p>
-                  </div>
+                  <CustomImageSelector onSelectMeme={onSelectMeme} />
                 </div>
               )}
             </motion.div>
@@ -721,11 +829,14 @@ function GameView({
                 </div>
               </div>
               
-              <div className="relative aspect-video rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-slate-900">
+              <div className="relative aspect-video rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-slate-900 flex items-center justify-center">
                 <img 
                   src={room.currentMeme?.url} 
                   alt="Meme" 
-                  className="w-full h-full object-contain"
+                  className="max-w-full max-h-full object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = 'https://i.imgflip.com/1otk96.jpg'; // Fallback image
+                  }}
                   referrerPolicy="no-referrer"
                 />
               </div>
@@ -764,11 +875,14 @@ function GameView({
                 <p className="text-slate-400">من صاحب أذكى تعليق؟</p>
               </div>
 
-              <div className="relative aspect-video rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-slate-900">
+              <div className="relative aspect-video rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-slate-900 flex items-center justify-center">
                 <img 
                   src={room.currentMeme?.url} 
                   alt="Meme" 
-                  className="w-full h-full object-contain opacity-50"
+                  className="max-w-full max-h-full object-contain opacity-50"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = 'https://i.imgflip.com/1otk96.jpg'; // Fallback image
+                  }}
                   referrerPolicy="no-referrer"
                 />
                 <div className="absolute inset-0 flex items-center justify-center p-12">
